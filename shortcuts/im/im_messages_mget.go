@@ -5,13 +5,13 @@ package im
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 
 	"github.com/larksuite/cli/internal/output"
 	"github.com/larksuite/cli/shortcuts/common"
-	convertlib "github.com/larksuite/cli/shortcuts/im/convert_lib"
+	larkcore "github.com/larksuite/oapi-sdk-go/v3/core"
 )
 
 const maxMGetMessageIDs = 50
@@ -52,53 +52,22 @@ var ImMessagesMGet = common.Shortcut{
 		ids := common.SplitCSV(runtime.Str("message-ids"))
 		mgetURL := buildMGetURL(ids)
 
-		data, err := runtime.DoAPIJSON(http.MethodGet, mgetURL, nil, nil)
+		apiResp, err := runtime.DoAPI(&larkcore.ApiReq{
+			HttpMethod: http.MethodGet,
+			ApiPath:    mgetURL,
+		})
 		if err != nil {
 			return err
 		}
-
-		rawItems, _ := data["items"].([]interface{})
-
-		nameCache := make(map[string]string)
-		messages := make([]map[string]interface{}, 0, len(rawItems))
-		for _, item := range rawItems {
-			m, _ := item.(map[string]interface{})
-			messages = append(messages, convertlib.FormatMessageItem(m, runtime, nameCache))
+		if apiResp.StatusCode >= 400 {
+			return output.ErrAPI(apiResp.StatusCode, string(apiResp.RawBody), nil)
 		}
 
-		convertlib.ResolveSenderNames(runtime, messages, nameCache)
-		convertlib.AttachSenderNames(messages, nameCache)
-		convertlib.ExpandThreadReplies(runtime, messages, nameCache, convertlib.ThreadRepliesPerThread, convertlib.ThreadRepliesTotalLimit)
-
-		outData := map[string]interface{}{
-			"messages": messages,
-			"total":    len(messages),
+		var raw map[string]any
+		if err := json.Unmarshal(apiResp.RawBody, &raw); err != nil {
+			return fmt.Errorf("unmarshal response: %w", err)
 		}
-		runtime.OutFormat(outData, nil, func(w io.Writer) {
-			if len(messages) == 0 {
-				fmt.Fprintln(w, "No messages found.")
-				return
-			}
-			var rows []map[string]interface{}
-			for _, msg := range messages {
-				row := map[string]interface{}{
-					"message_id": msg["message_id"],
-					"time":       msg["create_time"],
-					"type":       msg["msg_type"],
-				}
-				if sender, ok := msg["sender"].(map[string]interface{}); ok {
-					if name, _ := sender["name"].(string); name != "" {
-						row["sender"] = name
-					}
-				}
-				if content, _ := msg["content"].(string); content != "" {
-					row["content"] = convertlib.TruncateContent(content, 40)
-				}
-				rows = append(rows, row)
-			}
-			output.PrintTable(w, rows)
-			fmt.Fprintf(w, "\n%d message(s)\ntip: use --format json to view full message content\n", len(messages))
-		})
+		runtime.Out(raw, nil)
 		return nil
 	},
 }

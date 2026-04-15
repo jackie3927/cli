@@ -32,6 +32,7 @@ var ImMessagesResourcesDownload = common.Shortcut{
 		{Name: "file-key", Desc: "resource key (img_xxx or file_xxx)", Required: true},
 		{Name: "type", Desc: "resource type (image or file)", Required: true, Enum: []string{"image", "file"}},
 		{Name: "output", Desc: "local save path (relative only, no .. traversal; defaults to file_key)"},
+		{Name: "use-ppe", Desc: "use PPE environment for download", Type: "bool"},
 	},
 	DryRun: func(ctx context.Context, runtime *common.RuntimeContext) *common.DryRunAPI {
 		fileKey := runtime.Str("file-key")
@@ -72,7 +73,7 @@ var ImMessagesResourcesDownload = common.Shortcut{
 			return output.ErrValidation("unsafe output path: %s", err)
 		}
 
-		finalPath, sizeBytes, err := downloadIMResourceToPath(ctx, runtime, messageId, fileKey, fileType, relPath)
+		finalPath, sizeBytes, err := downloadIMResourceToPath(ctx, runtime, messageId, fileKey, fileType, relPath, runtime.Bool("use-ppe"))
 		if err != nil {
 			return err
 		}
@@ -151,6 +152,7 @@ type rangeChunkReader struct {
 	messageID  string
 	fileKey    string
 	fileType   string
+	usePPE     bool
 	totalSize  int64
 	delivered  int64
 	current    io.ReadCloser
@@ -163,6 +165,7 @@ func newRangeChunkReader(
 	messageID, fileKey, fileType string,
 	probeBody io.ReadCloser,
 	totalSize int64,
+	usePPE bool,
 ) *rangeChunkReader {
 	return &rangeChunkReader{
 		ctx:        ctx,
@@ -170,6 +173,7 @@ func newRangeChunkReader(
 		messageID:  messageID,
 		fileKey:    fileKey,
 		fileType:   fileType,
+		usePPE:     usePPE,
 		totalSize:  totalSize,
 		current:    probeBody,
 		nextOffset: probeChunkSize,
@@ -226,7 +230,7 @@ func (r *rangeChunkReader) Read(p []byte) (int, error) {
 		end := min(r.nextOffset+normalChunkSize-1, r.totalSize-1)
 		resp, err := doIMResourceDownloadRequest(r.ctx, r.runtime, r.messageID, r.fileKey, r.fileType, map[string]string{
 			"Range": fmt.Sprintf("bytes=%d-%d", r.nextOffset, end),
-		})
+		}, r.usePPE)
 		if err != nil {
 			return 0, err
 		}
@@ -262,8 +266,8 @@ func initialIMResourceDownloadHeaders(fileType string) map[string]string {
 	}
 }
 
-func downloadIMResourceToPath(ctx context.Context, runtime *common.RuntimeContext, messageID, fileKey, fileType, outputPath string) (string, int64, error) {
-	downloadResp, err := doIMResourceDownloadRequest(ctx, runtime, messageID, fileKey, fileType, initialIMResourceDownloadHeaders(fileType))
+func downloadIMResourceToPath(ctx context.Context, runtime *common.RuntimeContext, messageID, fileKey, fileType, outputPath string, usePPE bool) (string, int64, error) {
+	downloadResp, err := doIMResourceDownloadRequest(ctx, runtime, messageID, fileKey, fileType, initialIMResourceDownloadHeaders(fileType), usePPE)
 	if err != nil {
 		return "", 0, err
 	}
@@ -286,7 +290,7 @@ func downloadIMResourceToPath(ctx context.Context, runtime *common.RuntimeContex
 			downloadResp.Body.Close()
 			return "", 0, output.ErrNetwork("invalid Content-Range header on range response: %s", err)
 		}
-		body = newRangeChunkReader(ctx, runtime, messageID, fileKey, fileType, downloadResp.Body, totalSize)
+		body = newRangeChunkReader(ctx, runtime, messageID, fileKey, fileType, downloadResp.Body, totalSize, usePPE)
 		sizeBytes = totalSize
 
 	case http.StatusOK:
@@ -328,13 +332,17 @@ func resolveIMResourceDownloadPath(safePath, contentType string) string {
 	return safePath
 }
 
-func doIMResourceDownloadRequest(ctx context.Context, runtime *common.RuntimeContext, messageID, fileKey, fileType string, headers map[string]string) (*http.Response, error) {
+func doIMResourceDownloadRequest(ctx context.Context, runtime *common.RuntimeContext, messageID, fileKey, fileType string, headers map[string]string, usePPE bool) (*http.Response, error) {
 	query := larkcore.QueryParams{}
 	query.Set("type", fileType)
 
 	headerValues := make(http.Header, len(headers))
 	for key, value := range headers {
 		headerValues.Set(key, value)
+	}
+	if usePPE {
+		headerValues.Set("x-tt-env", "ppe_resource_download_file")
+		headerValues.Set("x-use-ppe", "1")
 	}
 
 	req := &larkcore.ApiReq{
