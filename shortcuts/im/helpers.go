@@ -1056,6 +1056,106 @@ func validateExplicitMsgType(cmd *cobra.Command, msgType, text, markdown, imageK
 	return fmt.Sprintf("--msg-type %q conflicts with the inferred message type %q from the selected content flag", msgType, inferred)
 }
 
+// attachmentItem is one parsed --attachment value: a required file/folder key.
+// 服务端不信任客户端 name（OAPI resolveAttachmentFile 禁止透传 name/size/mime/is_folder，
+// 一律以文件服务元信息回填），故 CLI 不接收 display name，只传纯 key。
+type attachmentItem struct {
+	Key string
+}
+
+// parseAttachmentFlag parses a single --attachment value: a bare "file_key".
+// 与 Slack file_ids 等竞品惯例一致（引用附件只传 id，不重复传 name）。
+func parseAttachmentFlag(value string) (attachmentItem, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return attachmentItem{}, errs.NewValidationError(errs.SubtypeInvalidArgument, "--attachment value must not be empty").WithParam("--attachment")
+	}
+	return attachmentItem{Key: value}, nil
+}
+
+// parseAttachments parses every --attachment value in order.
+func parseAttachments(values []string) ([]attachmentItem, error) {
+	items := make([]attachmentItem, 0, len(values))
+	for _, v := range values {
+		it, err := parseAttachmentFlag(v)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, it)
+	}
+	return items, nil
+}
+
+// mergeAttachmentsIntoPostContent merges attachment items into a post content
+// JSON's top-level "files" array, preserving any files already present in
+// --content. Post content JSON shape (OpenAPI):
+// {"zh_cn":{...},"files":[{"key":...}]}. name 等元信息由服务端文件服务回填，CLI 不传。
+func mergeAttachmentsIntoPostContent(content string, items []attachmentItem) (string, error) {
+	parsed := make(map[string]interface{})
+	if content != "" {
+		if err := json.Unmarshal([]byte(content), &parsed); err != nil {
+			return "", err
+		}
+	}
+	var files []map[string]interface{}
+	if existing, ok := parsed["files"].([]interface{}); ok {
+		for _, e := range existing {
+			if m, ok := e.(map[string]interface{}); ok {
+				files = append(files, m)
+			}
+		}
+	}
+	for _, it := range items {
+		files = append(files, map[string]interface{}{"key": it.Key})
+	}
+	parsed["files"] = files
+	b, err := json.Marshal(parsed)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+// clearAttachmentsInPostContent sets the top-level "files" array of a post
+// content JSON to an empty array ([]), signaling the server to clear the
+// message's attachment zone. If content is empty, it returns a minimal post
+// content with an empty body and empty attachment zone.
+func clearAttachmentsInPostContent(content string) (string, error) {
+	parsed := make(map[string]interface{})
+	if content != "" {
+		if err := json.Unmarshal([]byte(content), &parsed); err != nil {
+			return "", err
+		}
+	}
+	parsed["files"] = []map[string]interface{}{}
+	b, err := json.Marshal(parsed)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+// validateAttachmentFlags parses attachment values and enforces the post-only
+// message-type constraint: attachment files live in a post message's attachment
+// zone, so the effective message type must be post (via --markdown or an
+// explicit --msg-type post with --content). flagName is the caller's flag name
+// (e.g. "--attachment" or "--set-attachments") used in error messages.
+func validateAttachmentFlags(values []string, msgType, markdown, flagName string) ([]attachmentItem, error) {
+	items, err := parseAttachments(values)
+	if err != nil {
+		return nil, err
+	}
+	for _, it := range items {
+		if !strings.HasPrefix(it.Key, "file_") {
+			return nil, errs.NewValidationError(errs.SubtypeInvalidArgument, "%s key must be a file/folder key (file_xxx), got %q", flagName, it.Key).WithParam(flagName)
+		}
+	}
+	if len(items) > 0 && markdown == "" && msgType != "post" {
+		return nil, errs.NewValidationError(errs.SubtypeInvalidArgument, "%s attaches files to a post message; use --markdown, or --msg-type post with --content", flagName).WithParam(flagName)
+	}
+	return items, nil
+}
+
 func detectIMFileType(filePath string) string {
 	ext := strings.ToLower(filepath.Ext(filePath))
 	switch ext {

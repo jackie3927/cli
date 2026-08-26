@@ -63,6 +63,44 @@ func TestPostConverterConvertFallback(t *testing.T) {
 	}
 }
 
+func TestPostConverterConvertAttachmentZone(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{
+			name: "file and folder attachments",
+			raw:  `{"zh_cn":{"title":"Docs","content":[[{"tag":"text","text":"see below"}]]},"files":[{"key":"file_1","name":"report.pdf"},{"key":"file_2","name":"assets","is_folder":true}]}`,
+			want: "Docs\nsee below\n[Attachment: report.pdf (file_1)]\n[Folder: assets (file_2)]",
+		},
+		{
+			name: "attachment without name shows key only",
+			raw:  `{"zh_cn":{"content":[[{"tag":"text","text":"hi"}]]},"files":[{"key":"file_3"}]}`,
+			want: "hi\n[Attachment: file_3]",
+		},
+		{
+			name: "attachment with empty key skipped",
+			raw:  `{"zh_cn":{"content":[[{"tag":"text","text":"hi"}]]},"files":[{"name":"no key"}]}`,
+			want: "hi",
+		},
+		{
+			name: "attachment zone only (empty post body)",
+			raw:  `{"files":[{"key":"file_4","name":"a.txt"}]}`,
+			want: "[Rich text message]\n[Attachment: a.txt (file_4)]",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := &ConvertContext{RawContent: tt.raw, MentionMap: map[string]string{}}
+			if got := (postConverter{}).Convert(ctx); got != tt.want {
+				t.Fatalf("postConverter.Convert() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestUnwrapPostLocale(t *testing.T) {
 	direct := map[string]interface{}{"title": "Direct"}
 	if got := unwrapPostLocale(direct); got["title"] != "Direct" {

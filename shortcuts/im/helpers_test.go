@@ -6,6 +6,7 @@ package im
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -188,6 +189,111 @@ func TestWrapMarkdownAsPostForDryRun(t *testing.T) {
 	}
 	if !strings.Contains(desc, "placeholder image keys") {
 		t.Fatalf("wrapMarkdownAsPostForDryRun() desc = %q, want placeholder note", desc)
+	}
+}
+
+func TestParseAttachmentFlag(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   string
+		wantKey string
+		wantErr bool
+	}{
+		{name: "key only", value: "file_123", wantKey: "file_123"},
+		{name: "whitespace trimmed", value: "  file_123  ", wantKey: "file_123"},
+		{name: "empty", value: "   ", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseAttachmentFlag(tt.value)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("parseAttachmentFlag(%q) expected error, got %#v", tt.value, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseAttachmentFlag(%q) unexpected error: %v", tt.value, err)
+			}
+			if got.Key != tt.wantKey {
+				t.Fatalf("parseAttachmentFlag(%q) = %+v, want key=%q", tt.value, got, tt.wantKey)
+			}
+		})
+	}
+}
+
+func TestParseAttachments(t *testing.T) {
+	got, err := parseAttachments([]string{"file_1", "file_2"})
+	if err != nil {
+		t.Fatalf("parseAttachments unexpected error: %v", err)
+	}
+	if len(got) != 2 || got[0].Key != "file_1" || got[1].Key != "file_2" {
+		t.Fatalf("parseAttachments() = %+v, want 2 items with keys set", got)
+	}
+}
+
+func TestMergeAttachmentsIntoPostContent(t *testing.T) {
+	items := []attachmentItem{{Key: "file_1"}, {Key: "file_2"}}
+	merged, err := mergeAttachmentsIntoPostContent(`{"zh_cn":{"content":[[{"tag":"text","text":"hi"}]]}}`, items)
+	if err != nil {
+		t.Fatalf("mergeAttachmentsIntoPostContent unexpected error: %v", err)
+	}
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(merged), &parsed); err != nil {
+		t.Fatalf("merged content is not valid JSON: %v\n%s", err, merged)
+	}
+	files, ok := parsed["files"].([]interface{})
+	if !ok || len(files) != 2 {
+		t.Fatalf("merged files = %#v, want 2 entries", parsed["files"])
+	}
+	// 不信任客户端 name：files 元素只应有 key，不应带 name 字段
+	for _, f := range files {
+		m, _ := f.(map[string]interface{})
+		if _, hasName := m["name"]; hasName {
+			t.Fatalf("merged files entry must not carry client name, got %#v", m)
+		}
+	}
+	if _, ok := parsed["zh_cn"]; !ok {
+		t.Fatalf("merged content lost the post body: %s", merged)
+	}
+
+	// Pre-existing files in --content are preserved, and --attachment appends.
+	merged2, err := mergeAttachmentsIntoPostContent(`{"files":[{"key":"existing"}]}`, items)
+	if err != nil {
+		t.Fatalf("mergeAttachmentsIntoPostContent(pre) unexpected error: %v", err)
+	}
+	var parsed2 map[string]interface{}
+	_ = json.Unmarshal([]byte(merged2), &parsed2)
+	files2, _ := parsed2["files"].([]interface{})
+	if len(files2) != 3 {
+		t.Fatalf("merged files with pre-existing = %d entries, want 3", len(files2))
+	}
+}
+
+func TestValidateAttachmentFlags(t *testing.T) {
+	tests := []struct {
+		name      string
+		values    []string
+		msgType   string
+		markdown  string
+		wantErr   bool
+	}{
+		{name: "post with markdown", values: []string{"file_1"}, msgType: "text", markdown: "# hi", wantErr: false},
+		{name: "post via msg-type", values: []string{"file_1"}, msgType: "post", markdown: "", wantErr: false},
+		{name: "text message rejected", values: []string{"file_1"}, msgType: "text", markdown: "", wantErr: true},
+		{name: "non-file key rejected", values: []string{"img_1"}, msgType: "post", markdown: "", wantErr: true},
+		{name: "empty ok", values: nil, msgType: "text", markdown: "", wantErr: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := validateAttachmentFlags(tt.values, tt.msgType, tt.markdown, "--attachment")
+			if tt.wantErr && err == nil {
+				t.Fatalf("validateAttachmentFlags() expected error, got nil")
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("validateAttachmentFlags() unexpected error: %v", err)
+			}
+		})
 	}
 }
 
@@ -618,6 +724,7 @@ func TestShortcuts(t *testing.T) {
 		"+chat-search",
 		"+chat-update",
 		"+message-read-users",
+		"+messages-edit",
 		"+messages-mget",
 		"+messages-read-status",
 		"+messages-reply",

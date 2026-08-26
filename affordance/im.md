@@ -109,6 +109,22 @@ lark-cli im +message-read-users --message-id om_xxx
 ### Skills
 - `lark-im/references/lark-im-message-read-status.md`
 
+## +messages-edit
+Use this to rewrite an already-sent message's content, including its attachment zone (files attached to a post message).
+
+### Prerequisites
+- Confirm the target message id, the new content, and that the calling identity is the original sender before editing.
+
+### Examples
+
+**Edit a message to a post with an attachment zone**
+```bash
+lark-cli im +messages-edit --message-id om_xxx --markdown "Updated content" --set-attachments file_xxx
+```
+
+### Skills
+- `lark-im/references/lark-im-messages-edit.md`
+
 ## +messages-mget
 Use this when one or more message_ids are already known and full message details are needed.
 

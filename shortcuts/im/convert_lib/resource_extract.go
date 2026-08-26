@@ -60,18 +60,30 @@ func extractResourceRefs(msgType, rawContent, messageID string, mergeSub map[str
 }
 
 // extractPostResourceRefs walks a post body's elements and collects img/media
-// resource refs.
+// resource refs, plus any attachment-zone file keys (top-level "files" array).
 func extractPostResourceRefs(rawContent, messageID string) []ResourceRef {
 	parsed, err := ParseJSONObject(rawContent)
 	if err != nil || parsed == nil {
 		return nil
 	}
+	var refs []ResourceRef
+	// Attachment zone: top-level files[] each carry a downloadable file key.
+	if rawFiles, ok := parsed["files"].([]interface{}); ok {
+		for _, raw := range rawFiles {
+			f, _ := raw.(map[string]interface{})
+			if f == nil {
+				continue
+			}
+			if key, _ := f["key"].(string); key != "" {
+				refs = append(refs, ResourceRef{MessageID: messageID, Key: key, Type: "file"})
+			}
+		}
+	}
 	body := unwrapPostLocale(parsed)
 	if body == nil {
-		return nil
+		return refs
 	}
 	blocks, _ := body["content"].([]interface{})
-	var refs []ResourceRef
 	for _, para := range blocks {
 		elems, _ := para.([]interface{})
 		for _, el := range elems {

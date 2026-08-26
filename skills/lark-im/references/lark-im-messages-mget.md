@@ -51,6 +51,13 @@ Each message contains:
 | `sender` | Sender information (includes `name`) |
 | `content` | Message content |
 
+For `post` messages, the attachment zone (top-level `files` array) is rendered as trailing lines in `content`, one per attachment:
+
+- `[Attachment: report.pdf (file_xxx)]` — a file
+- `[Folder: assets (file_xxx)]` — a folder (`is_folder: true`)
+
+Use `--format json` to see the full raw content, including each file's `key` / `name` / `is_folder`. Attachment file keys are also eligible for [`+messages-resources-download`](lark-im-messages-resources-download.md) via `--download-resources`.
+
 ## Usage Scenarios
 
 ### Scenario 1: Fetch the full content of a specific message

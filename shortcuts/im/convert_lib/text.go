@@ -31,31 +31,68 @@ func (postConverter) Convert(ctx *ConvertContext) string {
 		return invalidJSONPlaceholder("rich text")
 	}
 	body := unwrapPostLocale(parsed)
-	if body == nil {
-		return "[Rich text message]"
-	}
 
 	var parts []string
-	if title, _ := body["title"].(string); title != "" {
-		parts = append(parts, title)
-	}
-	// Prefer content_v2 blocks; fallback to content blocks
-	blocks := selectContentBlocks(body)
-	for _, para := range blocks {
-		elems, _ := para.([]interface{})
-		var line strings.Builder
-		for _, el := range elems {
-			elem, _ := el.(map[string]interface{})
-			line.WriteString(renderPostElem(elem))
+	if body != nil {
+		if title, _ := body["title"].(string); title != "" {
+			parts = append(parts, title)
 		}
-		parts = append(parts, line.String())
+		// Prefer content_v2 blocks; fallback to content blocks
+		blocks := selectContentBlocks(body)
+		for _, para := range blocks {
+			elems, _ := para.([]interface{})
+			var line strings.Builder
+			for _, el := range elems {
+				elem, _ := el.(map[string]interface{})
+				line.WriteString(renderPostElem(elem))
+			}
+			parts = append(parts, line.String())
+		}
 	}
 
 	result := strings.TrimSpace(strings.Join(parts, "\n"))
 	if result == "" {
-		return "[Rich text message]"
+		result = "[Rich text message]"
 	}
-	return ResolveMentionKeys(result, ctx.MentionMap)
+	result = ResolveMentionKeys(result, ctx.MentionMap)
+	// Attachment zone (top-level "files" array, sibling of the locale keys) is
+	// rendered as trailing lines so agents can see file/folder keys for download.
+	if attachments := renderPostAttachments(parsed); attachments != "" {
+		result += "\n" + attachments
+	}
+	return result
+}
+
+// renderPostAttachments renders a post message's attachment zone to
+// human-readable lines, one per attachment. Files and folders (is_folder=true)
+// are labelled distinctly and always carry the file key so downstream agents
+// can resolve/download the resource.
+func renderPostAttachments(parsed map[string]interface{}) string {
+	rawFiles, ok := parsed["files"].([]interface{})
+	if !ok || len(rawFiles) == 0 {
+		return ""
+	}
+	var lines []string
+	for _, raw := range rawFiles {
+		f, _ := raw.(map[string]interface{})
+		if f == nil {
+			continue
+		}
+		key, _ := f["key"].(string)
+		if key == "" {
+			continue
+		}
+		label := "Attachment"
+		if isFolder, _ := f["is_folder"].(bool); isFolder {
+			label = "Folder"
+		}
+		if name, _ := f["name"].(string); name != "" {
+			lines = append(lines, fmt.Sprintf("[%s: %s (%s)]", label, name, key))
+		} else {
+			lines = append(lines, fmt.Sprintf("[%s: %s]", label, key))
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // selectContentBlocks returns content_v2 blocks when present and non-empty;

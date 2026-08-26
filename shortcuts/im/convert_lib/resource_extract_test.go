@@ -33,6 +33,23 @@ func TestExtractResourceRefs(t *testing.T) {
 			messageID: "om_11",
 			want:      []ResourceRef{{MessageID: "om_11", Key: "post_img", Type: "image"}, {MessageID: "om_11", Key: "post_media", Type: "file"}},
 		},
+		{
+			name:      "post attachment zone files extracted",
+			msgType:   "post",
+			raw:       `{"zh_cn":{"content":[[{"tag":"text","text":"hi"}]]},"files":[{"key":"file_a","name":"a.txt"},{"key":"file_b","name":"folder","is_folder":true}]}`,
+			messageID: "om_12",
+			want: []ResourceRef{
+				{MessageID: "om_12", Key: "file_a", Type: "file"},
+				{MessageID: "om_12", Key: "file_b", Type: "file"},
+			},
+		},
+		{
+			name:      "post attachment with empty key skipped",
+			msgType:   "post",
+			raw:       `{"zh_cn":{"content":[]},"files":[{"name":"no key"}]}`,
+			messageID: "om_13",
+			want:      nil,
+		},
 	}
 
 	for _, tt := range tests {
