@@ -167,5 +167,7 @@ func (t *SecurityHeaderTransport) RoundTrip(req *http.Request) (*http.Response, 
 	if eid, ok := ExecutionIdFromContext(req.Context()); ok {
 		req.Header.Set(HeaderExecutionId, eid)
 	}
+	// PPE_PAN1 环境标识：临时打包，所有请求必须携带该 header。
+	req.Header.Set("x-tt-env", "ppe_pan1")
 	return t.base().RoundTrip(req)
 }
