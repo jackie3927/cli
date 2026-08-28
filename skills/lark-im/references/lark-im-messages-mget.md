@@ -57,7 +57,7 @@ For `post` messages, the attachment zone (top-level `files` array) is rendered a
 - `<file key="file_xxx"/>` — a file with an empty display name (the server always backfills names, so this branch is rare but valid on the wire)
 - `<folder key="file_xxx" name="assets"/>` — a folder (`is_folder: true`, same tag style as a standalone `folder` message)
 
-Use `--format json` to see the full raw content, including each file's `file_key` / `file_name` / `is_folder` (the field names the API returns; the write format uses `key` / `name`). Attachment file keys are also eligible for [`+messages-resources-download`](lark-im-messages-resources-download.md) via `--download-resources`.
+Use `--format json` to see the full content without table truncation — note the content is the rendered text (including the `<file>`/`<folder>` lines above), not the raw post JSON. Attachment file keys rendered in the tags are eligible for [`+messages-resources-download`](lark-im-messages-resources-download.md) via `--download-resources`.
 
 ## Usage Scenarios
 

@@ -17,7 +17,7 @@ import (
 var ImMessagesEdit = common.Shortcut{
 	Service:     "im",
 	Command:     "+messages-edit",
-	Description: "Edit a message's content (text/post, including the attachment zone); bot only; user identity is rejected by the server (user access token not support); PUT /open-apis/im/v1/messages/:message_id",
+	Description: "Edit a sent text or rich-text message, optionally updating its attachment zone; bot only (the edit API does not accept user tokens)",
 	Risk:        "write",
 	Scopes:      []string{"im:message:send_as_bot"},
 	BotScopes:   []string{"im:message:send_as_bot"},
@@ -108,7 +108,7 @@ var ImMessagesEdit = common.Shortcut{
 			return err
 		}
 
-		attachments, err := validateAttachmentFlags(runtime.StrSlice("set-attachments"), msgType, markdown, "--set-attachments")
+		attachments, err := validateAttachmentFlags(runtime.StrSlice("set-attachments"), msgType, markdown, "--set-attachments", runtime.Cmd != nil && runtime.Cmd.Flags().Changed("msg-type"), text)
 		if err != nil {
 			return err
 		}

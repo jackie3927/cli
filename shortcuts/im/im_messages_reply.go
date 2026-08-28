@@ -131,7 +131,7 @@ var ImMessagesReply = common.Shortcut{
 			return err
 		}
 
-		attachments, err := validateAttachmentFlags(runtime.StrSlice("attachment"), msgType, markdown, "--attachment")
+		attachments, err := validateAttachmentFlags(runtime.StrSlice("attachment"), msgType, markdown, "--attachment", runtime.Cmd != nil && runtime.Cmd.Flags().Changed("msg-type"), text)
 		if err != nil {
 			return err
 		}

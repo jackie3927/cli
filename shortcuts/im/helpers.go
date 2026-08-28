@@ -1179,7 +1179,12 @@ func replaceAttachmentsIntoPostContent(content string, items []attachmentItem) (
 		}
 	}
 	files := make([]map[string]interface{}, 0, len(items))
+	seen := make(map[string]bool)
 	for _, it := range items {
+		if seen[it.Key] {
+			continue
+		}
+		seen[it.Key] = true
 		files = append(files, map[string]interface{}{"key": it.Key})
 	}
 	parsed["files"] = files
@@ -1218,7 +1223,7 @@ func clearAttachmentsInPostContent(content string) (string, error) {
 // zone, so the effective message type must be post (via --markdown or an
 // explicit --msg-type post with --content). flagName is the caller's flag name
 // (e.g. "--attachment" or "--set-attachments") used in error messages.
-func validateAttachmentFlags(values []string, msgType, markdown, flagName string) ([]attachmentItem, error) {
+func validateAttachmentFlags(values []string, msgType, markdown, flagName string, msgTypeExplicit bool, text string) ([]attachmentItem, error) {
 	items, err := parseAttachments(values, flagName)
 	if err != nil {
 		return nil, err
@@ -1228,8 +1233,17 @@ func validateAttachmentFlags(values []string, msgType, markdown, flagName string
 			return nil, errs.NewValidationError(errs.SubtypeInvalidArgument, "%s key must be a file/folder key (file_xxx), got %q", flagName, it.Key).WithParam(flagName)
 		}
 	}
-	if len(items) > 0 && markdown == "" && msgType != "post" {
-		return nil, errs.NewValidationError(errs.SubtypeInvalidArgument, "%s attaches files to a post message; use --markdown, or --msg-type post with --content", flagName).WithParam(flagName)
+	// --text is a standalone text message; it cannot carry a post attachment
+	// zone (we do not wrap literal text into a post node).
+	if len(items) > 0 && text != "" {
+		return nil, errs.NewValidationError(errs.SubtypeInvalidArgument, "%s attaches files to a post message and cannot be combined with --text; use --markdown (or --msg-type post with --content) for the body", flagName).WithParam(flagName)
+	}
+	// Attachments imply a post message. When the caller did not explicitly set
+	// --msg-type, infer post automatically (same as --markdown); only an
+	// explicit incompatible --msg-type is a conflict. A markdown body already
+	// infers post, so it is always compatible.
+	if len(items) > 0 && markdown == "" && msgTypeExplicit && msgType != "post" {
+		return nil, errs.NewValidationError(errs.SubtypeInvalidArgument, "%s attaches files to a post message; --msg-type %q conflicts with the inferred post type", flagName, msgType).WithParam(flagName)
 	}
 	return items, nil
 }

@@ -303,25 +303,29 @@ func TestMergeAttachmentsIntoPostContent(t *testing.T) {
 }
 
 // TestValidateAttachmentFlags covers key prefix and post-only constraints.
+// Attachments imply post: without an explicit --msg-type the type is inferred
+// as post; only an explicit incompatible --msg-type conflicts.
 func TestValidateAttachmentFlags(t *testing.T) {
 	tests := []struct {
-		name     string
-		values   []string
-		msgType  string
-		markdown string
-		wantErr  bool
-		wantSub  errs.Subtype // expected validation subtype when wantErr
-		wantFlag string       // expected --flag in the typed error
+		name            string
+		values          []string
+		msgType         string
+		markdown        string
+		msgTypeExplicit bool
+		wantErr         bool
+		wantSub         errs.Subtype // expected validation subtype when wantErr
+		wantFlag        string       // expected --flag in the typed error
 	}{
 		{name: "post with markdown", values: []string{"file_1"}, msgType: "text", markdown: "# hi", wantErr: false},
-		{name: "post via msg-type", values: []string{"file_1"}, msgType: "post", markdown: "", wantErr: false},
-		{name: "text message rejected", values: []string{"file_1"}, msgType: "text", markdown: "", wantErr: true, wantSub: errs.SubtypeInvalidArgument, wantFlag: "--attachment"},
+		{name: "post via explicit msg-type", values: []string{"file_1"}, msgType: "post", markdown: "", msgTypeExplicit: true, wantErr: false},
+		{name: "implicit msg-type infers post", values: []string{"file_1"}, msgType: "text", markdown: "", msgTypeExplicit: false, wantErr: false},
+		{name: "explicit non-post rejected", values: []string{"file_1"}, msgType: "text", markdown: "", msgTypeExplicit: true, wantErr: true, wantSub: errs.SubtypeInvalidArgument, wantFlag: "--attachment"},
 		{name: "non-file key rejected", values: []string{"img_1"}, msgType: "post", markdown: "", wantErr: true, wantSub: errs.SubtypeInvalidArgument, wantFlag: "--attachment"},
 		{name: "empty ok", values: nil, msgType: "text", markdown: "", wantErr: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := validateAttachmentFlags(tt.values, tt.msgType, tt.markdown, "--attachment")
+			_, err := validateAttachmentFlags(tt.values, tt.msgType, tt.markdown, "--attachment", tt.msgTypeExplicit, "")
 			if tt.wantErr && err == nil {
 				t.Fatalf("validateAttachmentFlags() expected error, got nil")
 			}
@@ -849,7 +853,7 @@ func TestSendReplyAttachmentDoesNotBypassContentValidation(t *testing.T) {
 			"chat-id": "oc_123", "text": "conflict", "markdown": "# wins",
 		}, map[string][]string{"attachment": {"file_1"}})
 		err := ImMessagesSend.Validate(context.Background(), rt)
-		if err == nil || !strings.Contains(err.Error(), "cannot be specified together") {
+		if err == nil || (!strings.Contains(err.Error(), "cannot be specified together") && !strings.Contains(err.Error(), "cannot be combined with --text")) {
 			t.Fatalf("ImMessagesSend.Validate() = %v, want text/markdown conflict", err)
 		}
 	})
